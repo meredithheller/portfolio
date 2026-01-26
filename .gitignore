@@ -1,0 +1,11 @@
+.env.local
+README.md
+QUICKSTART.md
+node_modules
+node_modules/# Next.js build artifacts
+/.next/
+/out/
+.next/
+
+# Lock files (optional, but reduces size)
+package-lock.json
