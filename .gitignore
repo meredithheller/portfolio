@@ -9,3 +9,4 @@ node_modules/# Next.js build artifacts
 
 # Lock files (optional, but reduces size)
 package-lock.json
+.vercel
