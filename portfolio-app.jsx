@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import {
   Box,
@@ -22,8 +22,6 @@ import {
 } from '@mui/material';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
-import { keyframes } from '@mui/system';
-
 // Create custom theme
 const theme = createTheme({
   palette: {
@@ -37,7 +35,7 @@ const theme = createTheme({
       light: '#5a6c7d',
     },
     background: {
-      default: '#f8f9fa',
+      default: '#fafafa',
       paper: '#ffffff',
     },
     text: {
@@ -46,31 +44,28 @@ const theme = createTheme({
     },
   },
   typography: {
-    fontFamily: '"Outfit", sans-serif',
+    fontFamily: '"Source Sans 3", system-ui, sans-serif',
     h1: {
-      fontFamily: '"Cormorant Garamond", serif',
-      fontWeight: 300,
+      fontFamily: '"Bricolage Grotesque", system-ui, sans-serif',
+      fontWeight: 600,
       letterSpacing: '-0.02em',
     },
     h2: {
-      fontFamily: '"Cormorant Garamond", serif',
-      fontWeight: 400,
+      fontFamily: '"Bricolage Grotesque", system-ui, sans-serif',
+      fontWeight: 600,
+      letterSpacing: '-0.01em',
     },
     body1: {
-      fontWeight: 300,
-      lineHeight: 1.8,
+      fontFamily: '"Source Sans 3", system-ui, sans-serif',
+      fontWeight: 400,
+      lineHeight: 1.75,
+      letterSpacing: '0.01em',
     },
   },
   shape: {
     borderRadius: 12,
   },
 });
-
-// Animations
-const float = keyframes`
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(-30px, -30px) scale(1.1); }
-`;
 
 // Initialize Supabase client
 // Replace with your actual Supabase credentials
@@ -84,8 +79,8 @@ export default function Portfolio() {
   const [sections, setSections] = useState([
     {
       id: 'hero',
-      header: "hi, i'm meredith",
-      text: "Hi, I'm Meredith Heller, a growth-minded software engineer obsessed with building products users actually come back to. Grounded in empathy and ambition, I turn bold ideas into lasting user value.",
+      header: "Hi, I'm Meredith,",
+      text: "a growth-minded software engineer obsessed with building products users actually come back to. Grounded in empathy and ambition, I turn bold ideas into lasting user value.",
       isDefault: true
     }
   ]);
@@ -110,6 +105,21 @@ export default function Portfolio() {
   const [clickCount, setClickCount] = useState(0);
   const clickTimerRef = useRef(null);
   const touchStartY = useRef(0);
+
+  // Scroll/swipe: ensure exactly one section per gesture, no glitches
+  const scrollContainerRef = useRef(null);
+  const wheelAccumulatorRef = useRef(0);
+  const lastWheelDirectionRef = useRef(0); // 1 = down, -1 = up
+  const isLockedRef = useRef(false);
+  const touchHandledRef = useRef(false);
+  const stateRef = useRef({ currentSection: 0, sectionCount: 1 });
+  const WHEEL_THRESHOLD = 80;
+  const SWIPE_THRESHOLD = 60;
+  const LOCK_MS = 800;
+
+  useEffect(() => {
+    stateRef.current = { currentSection, sectionCount: sections.length };
+  }, [currentSection, sections.length]);
 
   // Load sections from Supabase
   useEffect(() => {
@@ -284,81 +294,142 @@ export default function Portfolio() {
     setSubmitSuccess(false);
   };
 
-  // Scroll handling
-  const handleWheel = (e) => {
-    if (isTransitioning) return;
-    
+  // Navigate exactly one section and lock until transition completes
+  const goSection = useCallback((direction) => {
+    if (isLockedRef.current) return false;
+    const { currentSection: cur, sectionCount: n } = stateRef.current;
+    if (direction > 0 && cur >= n - 1) return false;
+    if (direction < 0 && cur <= 0) return false;
+    isLockedRef.current = true;
     setIsTransitioning(true);
-    if (e.deltaY > 0 && currentSection < sections.length - 1) {
-      setCurrentSection(prev => prev + 1);
-    } else if (e.deltaY < 0 && currentSection > 0) {
-      setCurrentSection(prev => prev - 1);
-    }
-    
-    setTimeout(() => setIsTransitioning(false), 800);
-  };
+    setCurrentSection((prev) => prev + direction);
+    setTimeout(() => {
+      isLockedRef.current = false;
+      setIsTransitioning(false);
+    }, LOCK_MS);
+    return true;
+  }, []);
 
-  const handleTouchStart = (e) => {
-    touchStartY.current = e.touches[0].clientY;
-  };
+  // Wheel: accumulate delta, one section per logical scroll, preventDefault
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
 
-  const handleTouchEnd = (e) => {
-    if (isTransitioning) return;
-    
-    const touchEndY = e.changedTouches[0].clientY;
-    const diff = touchStartY.current - touchEndY;
-    
-    if (Math.abs(diff) > 50) {
-      setIsTransitioning(true);
-      if (diff > 0 && currentSection < sections.length - 1) {
-        setCurrentSection(prev => prev + 1);
-      } else if (diff < 0 && currentSection > 0) {
-        setCurrentSection(prev => prev - 1);
+    const onWheel = (e) => {
+      if (isLockedRef.current) {
+        e.preventDefault();
+        return;
       }
-      setTimeout(() => setIsTransitioning(false), 800);
-    }
-  };
+      const { currentSection: cur, sectionCount: n } = stateRef.current;
+      const dir = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
+      if (dir !== 0 && lastWheelDirectionRef.current !== 0 && dir !== lastWheelDirectionRef.current) {
+        wheelAccumulatorRef.current = 0;
+      }
+      lastWheelDirectionRef.current = dir || lastWheelDirectionRef.current;
+      wheelAccumulatorRef.current += e.deltaY;
+
+      const acc = wheelAccumulatorRef.current;
+      if (acc >= WHEEL_THRESHOLD && cur < n - 1) {
+        wheelAccumulatorRef.current = 0;
+        lastWheelDirectionRef.current = 0;
+        goSection(1);
+        e.preventDefault();
+      } else if (acc <= -WHEEL_THRESHOLD && cur > 0) {
+        wheelAccumulatorRef.current = 0;
+        lastWheelDirectionRef.current = 0;
+        goSection(-1);
+        e.preventDefault();
+      } else if (cur >= n - 1 && acc > 0) {
+        wheelAccumulatorRef.current = 0;
+        e.preventDefault();
+      } else if (cur <= 0 && acc < 0) {
+        wheelAccumulatorRef.current = 0;
+        e.preventDefault();
+      } else {
+        e.preventDefault();
+      }
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [goSection]);
+
+  // Touch: one section per swipe, preventDefault when we handle it
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const onTouchStart = (e) => {
+      touchStartY.current = e.touches[0].clientY;
+      touchHandledRef.current = false;
+    };
+
+    const onTouchEnd = (e) => {
+      if (isLockedRef.current || touchHandledRef.current) return;
+      const touchEndY = e.changedTouches[0].clientY;
+      const diff = touchStartY.current - touchEndY;
+      if (Math.abs(diff) < SWIPE_THRESHOLD) return;
+
+      const { currentSection: cur, sectionCount: n } = stateRef.current;
+      if (diff > 0 && cur < n - 1) {
+        touchHandledRef.current = true;
+        goSection(1);
+        e.preventDefault();
+      } else if (diff < 0 && cur > 0) {
+        touchHandledRef.current = true;
+        goSection(-1);
+        e.preventDefault();
+      }
+    };
+
+    const onTouchMove = (e) => {
+      if (touchHandledRef.current || isLockedRef.current) {
+        e.preventDefault();
+        return;
+      }
+      const y = e.touches[0].clientY;
+      const diff = touchStartY.current - y;
+      if (Math.abs(diff) > SWIPE_THRESHOLD) {
+        const { currentSection: cur, sectionCount: n } = stateRef.current;
+        const wouldGoNext = diff > 0 && cur < n - 1;
+        const wouldGoPrev = diff < 0 && cur > 0;
+        if (wouldGoNext || wouldGoPrev) {
+          touchHandledRef.current = true;
+          goSection(diff > 0 ? 1 : -1);
+          e.preventDefault();
+        }
+      }
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: false });
+    el.addEventListener('touchcancel', onTouchEnd, { passive: false });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [goSection]);
 
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <link
-        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=Outfit:wght@300;400;500;600&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700&family=Source+Sans+3:ital,wght@0,300..700;1,300..700&display=swap"
         rel="stylesheet"
       />
       
       <Box
-        onWheel={handleWheel}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
+        ref={scrollContainerRef}
         sx={{
           width: '100vw',
           height: '100vh',
           overflow: 'hidden',
           position: 'relative',
-          background: 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 50%, #dee2e6 100%)',
-          '&::before': {
-            content: '""',
-            position: 'absolute',
-            top: '-50%',
-            right: '-20%',
-            width: '80%',
-            height: '80%',
-            background: 'radial-gradient(circle, rgba(79, 156, 217, 0.08) 0%, transparent 70%)',
-            borderRadius: '50%',
-            animation: `${float} 20s ease-in-out infinite`,
-          },
-          '&::after': {
-            content: '""',
-            position: 'absolute',
-            bottom: '-30%',
-            left: '-10%',
-            width: '60%',
-            height: '60%',
-            background: 'radial-gradient(circle, rgba(58, 134, 255, 0.06) 0%, transparent 70%)',
-            borderRadius: '50%',
-            animation: `${float} 15s ease-in-out infinite reverse`,
-          },
+          touchAction: 'none',
+          backgroundColor: '#fafafa',
         }}
       >
         {/* Header */}
@@ -373,17 +444,21 @@ export default function Portfolio() {
             justifyContent: 'space-between',
             alignItems: 'center',
             zIndex: 1000,
-            background: 'linear-gradient(180deg, rgba(248, 249, 250, 0.95) 0%, transparent 100%)',
-            backdropFilter: 'blur(10px)',
+            backgroundColor: 'rgba(250, 250, 250, 0.85)',
+            backdropFilter: 'blur(12px)',
+            borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
           }}
         >
           <Typography
             variant="h5"
             onClick={handleLogoClick}
             sx={{
-              fontWeight: 300,
+              fontFamily: '"Bricolage Grotesque", system-ui, sans-serif',
+              fontWeight: 600,
               color: 'secondary.main',
-              letterSpacing: '0.05em',
+              letterSpacing: '0.08em',
+              lineHeight: 1.5,
+              display: 'block',
               cursor: 'pointer',
               userSelect: 'none',
               transition: 'all 0.3s ease',
@@ -499,10 +574,13 @@ export default function Portfolio() {
                 <Typography
                   variant="h1"
                   sx={{
+                    fontFamily: '"Bricolage Grotesque", system-ui, sans-serif',
+                    fontWeight: 700,
+                    letterSpacing: { xs: '-0.02em', md: '-0.03em' },
                     fontSize: { xs: '3rem', sm: '5rem', md: '7rem' },
                     mb: 3,
                     textAlign: 'center',
-                    lineHeight: 1.1,
+                    lineHeight: 1.08,
                     color: 'text.primary',
                   }}
                 >
@@ -511,10 +589,14 @@ export default function Portfolio() {
                 <Typography
                   variant="body1"
                   sx={{
-                    fontSize: { xs: '1.1rem', md: '1.4rem' },
+                    fontFamily: '"Source Sans 3", system-ui, sans-serif',
+                    fontWeight: 400,
+                    fontSize: { xs: '1.1rem', md: '1.35rem' },
                     color: 'text.secondary',
                     maxWidth: '700px',
                     textAlign: 'center',
+                    lineHeight: 1.8,
+                    letterSpacing: '0.01em',
                     '& a': {
                       color: 'primary.main',
                       textDecoration: 'none',
@@ -546,7 +628,16 @@ export default function Portfolio() {
           {sections.map((_, index) => (
             <Box
               key={index}
-              onClick={() => !isTransitioning && setCurrentSection(index)}
+              onClick={() => {
+                if (isTransitioning) return;
+                isLockedRef.current = true;
+                setIsTransitioning(true);
+                setCurrentSection(index);
+                setTimeout(() => {
+                  isLockedRef.current = false;
+                  setIsTransitioning(false);
+                }, LOCK_MS);
+              }}
               sx={{
                 width: 10,
                 height: 10,

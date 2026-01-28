@@ -6,6 +6,7 @@ node_modules/# Next.js build artifacts
 /.next/
 /out/
 .next/
+.nvmrc
 
 # Lock files (optional, but reduces size)
 package-lock.json
